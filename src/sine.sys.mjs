@@ -64,6 +64,11 @@ const Sine = {
 
     // Inject https://zen-browser.app/mods/ API.
     import("./services/injectAPI.sys.mjs");
+
+    // Keep the bootloader in place across browser updates (Linux).
+    import("./services/bootloaderGuard.sys.mjs")
+      .then((guard) => guard.default.init())
+      .catch((err) => console.warn(`[Sine]: Bootloader guard failed: ${err}`));
   },
 };
 
