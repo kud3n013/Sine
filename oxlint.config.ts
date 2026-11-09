@@ -35,6 +35,18 @@ export default defineConfig({
       files: ["src/core/browser.mjs", "src/services/updates.mjs"],
       globals: Object.assign({}, browserGlobals, { gZenMods: "readonly" }),
     },
+    {
+      // Appended to the browser's config.js, which runs in the AutoConfig scope.
+      files: ["tests/smoke/*.js"],
+      globals: {
+        Services: "readonly",
+        ChromeUtils: "readonly",
+        Cc: "readonly",
+        Ci: "readonly",
+        Cu: "readonly",
+        dump: "readonly",
+      },
+    },
   ],
   ignorePatterns: ["src/assets/imports/"],
 });
