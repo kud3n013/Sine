@@ -3,7 +3,9 @@ name: Zen compatibility
 # Installs Sine into the newest Zen release and Twilight build, opens the
 # settings page headlessly and checks that the Sine Mods pane is injected.
 # Each Zen build is tested once per Sine commit; a failure opens (or comments
-# on) a "zen-compat" issue so breakage is caught before users update.
+# on) a "zen-compat" issue. When the stable (beta) build fails, Claude Code then
+# tries to fix Sine and opens a PR (needs the CLAUDE_CODE_OAUTH_TOKEN or
+# ANTHROPIC_API_KEY repository secret).
 
 on:
   schedule:
@@ -28,8 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write # auto-fix pushes a branch
       issues: write
+      pull-requests: write # auto-fix opens a PR
+      id-token: write # claude-code-action authentication
+    env:
+      HAS_CLAUDE_CREDENTIALS: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +116,7 @@ jobs:
           key: ${{ steps.zen.outputs.key }}
 
       - name: Report failure
+        id: report
         if: failure() && steps.smoke.outcome == 'failure' && (github.event_name == 'schedule' || github.ref == 'refs/heads/main')
         env:
           GH_TOKEN: ${{ github.token }}
@@ -137,5 +144,60 @@ jobs:
           if [[ -n "$existing" ]]; then
             gh issue comment "$existing" --body-file body.md
           else
-            gh issue create --title "$title" --label zen-compat --body-file body.md
+            url="$(gh issue create --title "$title" --label zen-compat --body-file body.md)"
+            existing="${url##*/}"
           fi
+          echo "issue=$existing" >> "$GITHUB_OUTPUT"
+
+      - name: Skip auto-fix if a fix PR is already open
+        id: open-fix
+        if: failure() && steps.report.outcome == 'success' && matrix.channel == 'beta' && env.HAS_CLAUDE_CREDENTIALS == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          count="$(gh pr list --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("zen-compat/"))] | length')"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Auto-fix with Claude Code
+        if: failure() && steps.open-fix.outputs.count == '0'
+        uses: anthropics/claude-code-action@402b5b79551e3ce6614c179fbccbfdb79291cead # v1.0.269
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ steps.report.outputs.issue }}
+            ZEN BUILD: ${{ steps.zen.outputs.build }} (stable channel, "zen-beta" in browsercfg)
+
+            Sine is a mod manager injected into Zen Browser's settings page. The
+            settings smoke test just failed against the Zen build above. The result
+            is in smoke-result.json and the browser output in smoke.log (both in the
+            working directory). The test itself is tests/smoke/settings.smoke.js and
+            the runner is scripts/smoke_test.sh.
+
+            1. Work out what Zen changed. Zen's source is at
+               https://github.com/zen-browser/desktop (shallow-clone the tag of the
+               build above); the settings page lives under
+               src/browser/components/preferences and mods under src/zen/mods.
+               Compare it with what src/core/settings.mjs, src/core/browser.mjs and
+               src/services/ rely on (element IDs, globals such as gZenMods,
+               gCategoryInits, window actors).
+            2. Fix Sine in src/ so it works with the new build. Keep the fix minimal
+               and keep compatibility with older Zen builds where practical.
+               Do not edit the smoke test to make it pass, and do not edit
+               .github/workflows.
+            3. Verify: `scripts/smoke_test.sh zen-beta smoke-result.json` must
+               report "passed": true. Also run `bun fmt` and `bun lint`.
+            4. Commit on a new branch named zen-compat/fix-${{ github.run_id }},
+               push it, and open a pull request against the default branch with
+               `gh pr create`. Explain what Zen changed and how the fix handles it,
+               and include "Fixes #${{ steps.report.outputs.issue }}".
+
+            If you cannot find or verify a fix, do not open a PR; instead comment on
+            issue #${{ steps.report.outputs.issue }} with what you found.
+          claude_args: |
+            --max-turns 80
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh pr:*),Bash(gh issue comment:*),Bash(bun:*),Bash(bunx:*),Bash(scripts/smoke_test.sh:*),Bash(cat:*),Bash(ls:*),Bash(grep:*),Bash(diff:*)"
