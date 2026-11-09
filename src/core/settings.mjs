@@ -19,7 +19,8 @@ const manager = window.manager;
 delete window.manager;
 
 if (ucAPI.utils.fork === "zen") {
-  document.querySelector("#category-zen-marketplace").remove();
+  // Optional chaining: a renamed element must not abort the rest of the injection.
+  document.querySelector("#category-zen-marketplace")?.remove();
   domUtils
     .waitForElm("#ZenMarketplaceCategory")
     .then((el) => el.remove())
