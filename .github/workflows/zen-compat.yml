@@ -195,6 +195,11 @@ jobs:
                push it, and open a pull request against the default branch with
                `gh pr create`. Explain what Zen changed and how the fix handles it,
                and include "Fixes #${{ steps.report.outputs.issue }}".
+               If `gh pr create` is refused because GitHub Actions is not allowed
+               to create pull requests in this repository, comment on issue
+               #${{ steps.report.outputs.issue }} instead with the explanation and
+               this link to open the PR in one click:
+               ${{ github.server_url }}/${{ github.repository }}/compare/${{ github.event.repository.default_branch }}...zen-compat/fix-${{ github.run_id }}?expand=1
 
             If you cannot find or verify a fix, do not open a PR; instead comment on
             issue #${{ steps.report.outputs.issue }} with what you found.
